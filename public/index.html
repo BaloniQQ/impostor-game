@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Impostor – gra słowna</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px 60px; background: #14161c; color: #eee; }
+    h1 { text-align: center; }
+    h3 { margin-bottom: 4px; }
+    input, button, select { width: 100%; padding: 12px; margin-top: 10px; font-size: 16px; border-radius: 8px; border: 1px solid #444; box-sizing: border-box; }
+    input, select { background: #1f222b; color: #eee; }
+    button { background: #5b6cff; color: white; border: none; cursor: pointer; }
+    button:hover { background: #4a59e0; }
+    button:disabled { background: #3a3d4a; color: #888; cursor: not-allowed; }
+    button.vote-btn { background: #b8403a; }
+    button.vote-btn:hover { background: #d04c45; }
+    label { display: block; margin-top: 14px; font-size: 14px; color: #aaa; }
+    .hidden { display: none; }
+    .error { color: #ff7b7b; min-height: 20px; margin-top: 8px; }
+    .hint { color: #aaa; font-size: 14px; margin-top: 8px; }
+    .code { font-size: 40px; letter-spacing: 8px; text-align: center; background: #1f222b; padding: 12px; border-radius: 8px; }
+    ul { padding-left: 0; list-style: none; }
+    li { background: #1f222b; padding: 10px 12px; margin-top: 8px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    li.offline { opacity: 0.45; }
+    li.dead { opacity: 0.5; text-decoration: line-through; }
+    li.current { outline: 2px solid #ffd45b; }
+    .tag { color: #ffd45b; font-size: 13px; margin-left: 6px; }
+    .clue { font-weight: bold; color: #8fd0ff; font-size: 18px; }
+    .pending { color: #ffd45b; font-size: 14px; }
+    .role-card { text-align: center; padding: 24px 16px; border-radius: 12px; background: #1f222b; margin-top: 16px; }
+    .role-card.impostor { border: 2px solid #ff5b5b; }
+    .role-card.crew { border: 2px solid #4ccf7a; }
+    .role-title { font-size: 26px; font-weight: bold; margin: 0 0 12px; }
+    .big-word { font-size: 34px; font-weight: bold; margin: 8px 0; }
+    .small { color: #aaa; font-size: 14px; }
+    .status { font-size: 18px; text-align: center; margin: 16px 0 0; }
+    .box { background: #1f222b; border-radius: 12px; padding: 16px; margin-top: 16px; }
+    .box h2 { margin: 0 0 8px; font-size: 22px; text-align: center; }
+    .box ul li { background: #2a2e3a; }
+    .win-crew { color: #4ccf7a; }
+    .win-imp { color: #ff6b6b; }
+    .history p { margin: 6px 0; font-size: 14px; color: #bbb; }
+    .notice { text-align: center; font-size: 16px; border: 2px solid #ffd45b; }
+    .notice.good { border-color: #ff6b6b; }
+  </style>
+</head>
+<body>
+  <h1>🕵️ Impostor</h1>
+
+  <!-- EKRAN STARTOWY -->
+  <div id="screen-home">
+    <input id="name" placeholder="Twoje imię" maxlength="20" />
+    <button id="btn-create">Stwórz pokój</button>
+    <input id="code" placeholder="Kod pokoju (np. ABCD)" maxlength="4" />
+    <button id="btn-join">Dołącz do pokoju</button>
+    <div class="error" id="error"></div>
+  </div>
+
+  <!-- EKRAN LOBBY -->
+  <div id="screen-lobby" class="hidden">
+    <p>Kod pokoju – podaj go znajomym:</p>
+    <div class="code" id="room-code"></div>
+    <h3>Gracze (<span id="count">0</span>)</h3>
+    <ul id="players"></ul>
+
+    <div id="host-controls" class="hidden">
+      <label for="impostors">Liczba impostorów</label>
+      <select id="impostors"></select>
+      <button id="btn-start">Zacznij grę</button>
+      <div class="hint" id="start-hint"></div>
+    </div>
+    <p id="wait-msg" class="hint hidden">Czekamy, aż gospodarz zacznie grę…</p>
+    <div class="error" id="lobby-error"></div>
+  </div>
+
+  <!-- EKRAN GRY -->
+  <div id="screen-game" class="hidden">
+    <div id="role-card" class="role-card"></div>
+    <p class="small" id="game-info"></p>
+
+    <p class="status" id="status"></p>
+
+    <!-- OGŁOSZENIE o strzale w hasło -->
+    <div id="notice" class="box notice hidden"></div>
+
+    <!-- Formularz wskazówki: stoi w HTML na stałe, żeby odświeżenia nie czyściły wpisywanego słowa -->
+    <div id="clue-form" class="hidden">
+      <input id="clue-input" placeholder="Twoja wskazówka (jedno słowo)" maxlength="25" autocomplete="off" />
+      <button id="btn-clue">Wyślij wskazówkę</button>
+      <div class="error" id="clue-error"></div>
+    </div>
+
+    <!-- ZGADYWANIE HASŁA – tylko w turze impostora, jako alternatywa dla wskazówki.
+         Stoi w HTML na stałe, żeby odświeżenia nie czyściły wpisywanego tekstu. -->
+    <div id="guess-box" class="box hidden">
+      <h2 style="font-size:18px">🎯 …albo zgadnij hasło</h2>
+      <p class="hint">Zamiast wskazówki możesz spróbować odgadnąć hasło. Trafisz – impostorzy wygrywają od razu. Pomylisz się – <b>odpadasz z gry</b>!</p>
+      <input id="guess-input" placeholder="Wpisz hasło" maxlength="40" autocomplete="off" />
+      <button id="btn-guess" class="vote-btn">Zgaduję hasło!</button>
+      <div class="error" id="guess-error"></div>
+    </div>
+
+    <!-- GŁOSOWANIE -->
+    <div id="vote-box" class="box hidden">
+      <h2>🗳️ Głosowanie</h2>
+      <p class="hint" id="vote-msg"></p>
+      <div id="vote-list"></div>
+      <p class="hint" id="vote-progress"></p>
+      <div class="error" id="vote-error"></div>
+    </div>
+
+    <!-- WYNIK GŁOSOWANIA / KONIEC GRY -->
+    <div id="result-box" class="box hidden">
+      <h2 id="result-title"></h2>
+      <p class="hint" id="result-sub" style="text-align:center"></p>
+      <ul id="result-votes"></ul>
+
+      <div id="end-info" class="hidden">
+        <h2 id="end-title"></h2>
+        <p class="hint" id="end-reason" style="text-align:center"></p>
+        <p style="text-align:center" id="end-word"></p>
+        <p style="text-align:center" id="end-impostors"></p>
+      </div>
+
+      <button id="btn-next" class="hidden">Następna runda</button>
+      <button id="btn-again" class="hidden">Zagraj ponownie</button>
+      <p class="hint hidden" id="wait-host" style="text-align:center">Czekamy na gospodarza…</p>
+      <div class="error" id="result-error"></div>
+    </div>
+
+    <h3 id="turn-title">Kolejność wskazówek</h3>
+    <ul id="turn-list"></ul>
+
+    <h3 id="history-title" class="hidden">Poprzednie rundy</h3>
+    <div id="history" class="history"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let myId = null;   // moje id
+    let room = null;   // ostatni publiczny stan pokoju
+    let myRole = null; // moja PRYWATNA rola (przychodzi tylko do mnie)
+
+    const $ = (id) => document.getElementById(id);
+
+    function nameOf(id) {
+      const p = room.players.find((pl) => pl.id === id);
+      return p ? p.name : '?';
+    }
+
+    function showError(msg) { $('error').textContent = msg || ''; }
+
+    function enterRoom(res) {
+      if (res.error) return showError(res.error);
+      myId = res.you;
+      $('screen-home').classList.add('hidden');
+      render();
+    }
+
+    // ---------- AKCJE GRACZA ----------
+    $('btn-create').onclick = () => {
+      socket.emit('room:create', { name: $('name').value }, enterRoom);
+    };
+
+    $('btn-join').onclick = () => {
+      socket.emit('room:join', { name: $('name').value, code: $('code').value }, enterRoom);
+    };
+
+    $('btn-start').onclick = () => {
+      $('lobby-error').textContent = '';
+      socket.emit('game:start', { impostors: Number($('impostors').value) }, (res) => {
+        if (res.error) $('lobby-error').textContent = res.error;
+      });
+    };
+
+    function sendClue() {
+      $('clue-error').textContent = '';
+      socket.emit('game:clue', { text: $('clue-input').value }, (res) => {
+        if (res.error) $('clue-error').textContent = res.error;
+        else $('clue-input').value = '';
+      });
+    }
+    $('btn-clue').onclick = sendClue;
+    $('clue-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendClue();
+    });
+
+    function sendVote(targetId) {
+      $('vote-error').textContent = '';
+      socket.emit('game:vote', { targetId }, (res) => {
+        if (res.error) $('vote-error').textContent = res.error;
+      });
+    }
+
+    function sendGuess() {
+      const text = $('guess-input').value.trim();
+      if (!text) { $('guess-error').textContent = 'Wpisz hasło.'; return; }
+      if (!confirm('Strzelasz: "' + text + '". Jeśli się mylisz, odpadasz z gry. Na pewno?')) return;
+      $('guess-error').textContent = '';
+      socket.emit('game:guess', { guess: text }, (res) => {
+        if (res.error) $('guess-error').textContent = res.error;
+        else $('guess-input').value = '';
+      });
+    }
+    $('btn-guess').onclick = sendGuess;
+    $('guess-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendGuess();
+    });
+
+    function hostAction(event) {
+      $('result-error').textContent = '';
+      socket.emit(event, {}, (res) => {
+        if (res.error) $('result-error').textContent = res.error;
+      });
+    }
+    $('btn-next').onclick = () => hostAction('game:next');
+    $('btn-again').onclick = () => hostAction('game:reset');
+
+    socket.on('room:update', (r) => {
+      // Powrót do lobby = koniec gry, stara rola przestaje obowiązywać.
+      // (Nie robimy tego w render(), bo serwer wysyła rolę PRZED zmianą fazy na "clues" –
+      //  render() wywołany przez zdarzenie roli widziałby jeszcze lobby i skasowałby świeżo przyjętą rolę.)
+      if (r.phase === 'lobby') myRole = null;
+      room = r;
+      render();
+    });
+    socket.on('game:role', (role) => { myRole = role; render(); });
+
+    // ---------- RYSOWANIE EKRANÓW ----------
+    function render() {
+      if (!room || !myId) return;
+      const inLobby = room.phase === 'lobby';
+      $('screen-lobby').classList.toggle('hidden', !inLobby);
+      $('screen-game').classList.toggle('hidden', inLobby);
+      if (inLobby) renderLobby(); else renderGame();
+    }
+
+    function renderLobby() {
+      $('room-code').textContent = room.code;
+      $('count').textContent = room.players.length;
+
+      const ul = $('players');
+      ul.innerHTML = '';
+      for (const p of room.players) {
+        const li = document.createElement('li');
+        const name = document.createElement('span');
+        name.textContent = p.name + (p.id === myId ? ' (Ty)' : '');
+        if (p.id === room.hostId) {
+          const tag = document.createElement('span');
+          tag.className = 'tag';
+          tag.textContent = '👑 gospodarz';
+          name.appendChild(tag);
+        }
+        li.appendChild(name);
+        ul.appendChild(li);
+      }
+
+      const isHost = room.hostId === myId;
+      $('host-controls').classList.toggle('hidden', !isHost);
+      $('wait-msg').classList.toggle('hidden', isHost);
+
+      // Ile impostorów wolno? (zawsze mniej niż uczestników)
+      const n = room.players.length;
+      const max = Math.max(1, Math.min(3, Math.floor((n - 1) / 2)));
+      const sel = $('impostors');
+      if (sel.options.length !== max) {
+        const prev = Number(sel.value) || 1;
+        sel.innerHTML = '';
+        for (let i = 1; i <= max; i++) {
+          const opt = document.createElement('option');
+          opt.value = i;
+          opt.textContent = i;
+          sel.appendChild(opt);
+        }
+        sel.value = Math.min(prev, max);
+      }
+      $('btn-start').disabled = n < 3;
+      $('start-hint').textContent = n < 3 ? 'Potrzeba co najmniej 3 graczy.' : '';
+    }
+
+    function renderRoleCard() {
+      const card = $('role-card');
+      card.innerHTML = '';
+      card.className = 'role-card';
+
+      if (!myRole) {
+        card.textContent = 'Ładowanie roli…';
+        return;
+      }
+
+      const title = document.createElement('p');
+      title.className = 'role-title';
+      const line1 = document.createElement('p');
+      line1.className = 'small';
+      const big = document.createElement('div');
+      big.className = 'big-word';
+      const line2 = document.createElement('p');
+      line2.className = 'small';
+
+      if (myRole.role === 'impostor') {
+        card.classList.add('impostor');
+        title.textContent = '🕵️ Jesteś IMPOSTOREM';
+        line1.textContent = 'Nie znasz hasła. Twoja podpowiedź (kategoria):';
+        big.textContent = myRole.category;
+        line2.textContent = 'Wtop się w tłum. W swojej turze możesz zamiast wskazówki spróbować odgadnąć hasło – ale pomyłka wyrzuca Cię z gry!';
+      } else {
+        card.classList.add('crew');
+        title.textContent = '✅ Jesteś uczestnikiem';
+        line1.textContent = 'Twoje hasło:';
+        big.textContent = myRole.word;
+        line2.textContent = 'Podawaj wskazówki tak, by poznali Cię swoi, ale nie impostor.';
+      }
+      card.append(title, line1, big, line2);
+    }
+
+    function renderGame() {
+      renderRoleCard();
+
+      const me = room.players.find((p) => p.id === myId);
+      const iAmAlive = !!(me && me.alive);
+      $('game-info').textContent =
+        'Impostorów w grze: ' + room.impostorCount + ' · Runda ' + room.round +
+        (iAmAlive ? '' : ' · Zostałeś wyrzucony – obserwujesz grę');
+
+      renderTurnList();
+      renderClueForm();
+      renderVoting(iAmAlive);
+      renderNotice();
+      renderGuess(iAmAlive);
+      renderResult();
+      renderHistory();
+
+      const statusByPhase = {
+        clues: null, // ustawiane w renderClueForm
+        voting: '🗳️ Wszyscy podali wskazówki. Czas głosować!',
+        result: '📣 Wyniki głosowania',
+        ended: '🏁 Koniec gry',
+      };
+      if (statusByPhase[room.phase]) $('status').textContent = statusByPhase[room.phase];
+    }
+
+    // Lista graczy w kolejności podawania wskazówek (bieżąca runda)
+    function renderTurnList() {
+      const clueByPlayer = {};
+      for (const c of room.clues) {
+        if (c.round === room.round) clueByPlayer[c.playerId] = c.text;
+      }
+
+      const ul = $('turn-list');
+      ul.innerHTML = '';
+      room.order.forEach((id, i) => {
+        const p = room.players.find((pl) => pl.id === id);
+        if (!p) return;
+        const li = document.createElement('li');
+        const name = document.createElement('span');
+        name.textContent = (i + 1) + '. ' + p.name + (id === myId ? ' (Ty)' : '') + (p.alive ? '' : ' ❌');
+        li.appendChild(name);
+
+        if (clueByPlayer[id]) {
+          const c = document.createElement('span');
+          c.className = 'clue';
+          c.textContent = clueByPlayer[id];
+          li.appendChild(c);
+        } else if (room.phase === 'clues' && id === room.currentPlayerId) {
+          li.classList.add('current');
+          const w = document.createElement('span');
+          w.className = 'pending';
+          w.textContent = '✍️ pisze…';
+          li.appendChild(w);
+        }
+        if (!p.alive) li.classList.add('dead');
+        if (!p.connected) li.classList.add('offline');
+        ul.appendChild(li);
+      });
+    }
+
+    function renderClueForm() {
+      const myTurn = room.phase === 'clues' && room.currentPlayerId === myId;
+      const form = $('clue-form');
+      const wasHidden = form.classList.contains('hidden');
+      form.classList.toggle('hidden', !myTurn);
+      if (myTurn && wasHidden) $('clue-input').focus();
+
+      if (room.phase === 'clues') {
+        $('status').textContent = myTurn
+          ? '👉 Twoja kolej! Podaj jedno słowo.'
+          : 'Kolej gracza: ' + nameOf(room.currentPlayerId);
+      }
+    }
+
+    function renderVoting(iAmAlive) {
+      const inVoting = room.phase === 'voting';
+      $('vote-box').classList.toggle('hidden', !inVoting);
+      if (!inVoting) return;
+
+      const iVoted = room.voted.includes(myId);
+      const list = $('vote-list');
+      list.innerHTML = '';
+
+      if (iAmAlive && !iVoted) {
+        $('vote-msg').textContent = 'Kogo wyrzucić? Głos jest ostateczny.';
+        for (const p of room.players) {
+          if (!p.alive || p.id === myId) continue;
+          const b = document.createElement('button');
+          b.className = 'vote-btn';
+          b.textContent = 'Wyrzuć: ' + p.name;
+          b.onclick = () => sendVote(p.id);
+          list.appendChild(b);
+        }
+      } else if (iAmAlive) {
+        $('vote-msg').textContent = 'Twój głos został oddany. Czekamy na pozostałych…';
+      } else {
+        $('vote-msg').textContent = 'Zostałeś wyrzucony – obserwujesz głosowanie.';
+      }
+
+      const voters = room.players.filter((p) => p.alive && p.connected);
+      const done = voters.filter((p) => room.voted.includes(p.id)).length;
+      $('vote-progress').textContent = 'Zagłosowało: ' + done + ' / ' + voters.length;
+    }
+
+    // Ogłoszenie o strzale w hasło (widoczne dla wszystkich)
+    function renderNotice() {
+      const box = $('notice');
+      const n = room.notice;
+      box.classList.toggle('hidden', !n);
+      box.classList.remove('good');
+      if (!n) return;
+      if (n.type === 'correct_guess') {
+        box.classList.add('good');
+        box.textContent = '🎯 ' + nameOf(n.playerId) + ' (impostor) odgadł hasło: „' + n.guess + '”!';
+      } else {
+        box.textContent = '❌ ' + nameOf(n.playerId) + ' próbował zgadnąć hasło („' + n.guess + '”), pomylił się i odpada z gry. Był impostorem!';
+      }
+    }
+
+    // Pole zgadywania: tylko żywy impostor i tylko w jego turze (zamiast wskazówki)
+    function renderGuess(iAmAlive) {
+      const myTurn = room.phase === 'clues' && room.currentPlayerId === myId;
+      const can = !!(myRole && myRole.role === 'impostor' && iAmAlive && myTurn);
+      $('guess-box').classList.toggle('hidden', !can);
+    }
+
+    function renderResult() {
+      const ended = room.phase === 'ended';
+      const hasVote = !!room.result;
+      const show = (room.phase === 'result' && hasVote) || ended;
+      $('result-box').classList.toggle('hidden', !show);
+      if (!show) return;
+
+      // Część "wynik głosowania" – tylko jeśli było głosowanie (przy zgadnięciu hasła go nie ma)
+      for (const id of ['result-title', 'result-sub', 'result-votes']) {
+        $(id).classList.toggle('hidden', !hasVote);
+      }
+      if (hasVote) {
+        const r = room.result;
+        if (r.ejectedId) {
+          $('result-title').textContent = '🚪 Wyrzucono: ' + nameOf(r.ejectedId);
+          $('result-sub').textContent = r.ejectedWasImpostor
+            ? 'To był IMPOSTOR! 🎯'
+            : 'To był zwykły uczestnik… 😬';
+        } else {
+          $('result-title').textContent = '🤝 Remis – nikt nie odpada';
+          $('result-sub').textContent = 'Zaczyna się nowa runda wskazówek.';
+        }
+
+        // Kto na kogo głosował (jawne dopiero po zakończeniu głosowania)
+        const ul = $('result-votes');
+        ul.innerHTML = '';
+        for (const v of r.votes) {
+          const li = document.createElement('li');
+          li.textContent = nameOf(v.voterId) + ' → ' + nameOf(v.targetId);
+          ul.appendChild(li);
+        }
+      }
+
+      const isHost = room.hostId === myId;
+
+      // Ekran końca gry
+      $('end-info').classList.toggle('hidden', !ended);
+      if (ended && room.reveal) {
+        const rv = room.reveal;
+        const crewWon = rv.winner === 'crew';
+        const t = $('end-title');
+        t.textContent = crewWon ? '🎉 Wygrywają uczestnicy!' : '🕵️ Wygrywają impostorzy!';
+        t.className = crewWon ? 'win-crew' : 'win-imp';
+        const reasons = {
+          guess: 'Impostor odgadł hasło.',
+          impostors_out: 'Wszyscy impostorzy zostali wyrzuceni.',
+          majority: 'Impostorów jest tyle samo co uczestników.',
+        };
+        $('end-reason').textContent = reasons[rv.endReason] || '';
+        $('end-word').textContent = 'Hasło: ' + rv.word + ' (kategoria: ' + rv.category + ')';
+        $('end-impostors').textContent = 'Impostorzy: ' + rv.impostorIds.map(nameOf).join(', ');
+      }
+
+      $('btn-next').classList.toggle('hidden', !(isHost && room.phase === 'result'));
+      $('btn-again').classList.toggle('hidden', !(isHost && ended));
+      $('wait-host').classList.toggle('hidden', isHost);
+    }
+
+    // Wskazówki z poprzednich rund – żeby było z czego wnioskować
+    function renderHistory() {
+      const box = $('history');
+      box.innerHTML = '';
+      let any = false;
+      for (let r = 1; r < room.round; r++) {
+        const items = room.clues.filter((c) => c.round === r).map((c) => nameOf(c.playerId) + ': ' + c.text);
+        if (!items.length) continue;
+        any = true;
+        const p = document.createElement('p');
+        p.textContent = 'Runda ' + r + ' — ' + items.join(' · ');
+        box.appendChild(p);
+      }
+      $('history-title').classList.toggle('hidden', !any);
+    }
+  </script>
+</body>
+</html>
